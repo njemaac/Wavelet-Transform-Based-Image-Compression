@@ -9,16 +9,16 @@ public class WaveletPipeline {
         ImageRGB rgb = ImageRGB.fromImage(img);
 
         Logger.debug("Forward DWT R...");
-        double[][] rCoef = haar.forward(rgb.r, -1);
+        float[][] rCoef = haar.forward(rgb.r, -1);
         Logger.debug("Forward DWT G...");
-        double[][] gCoef = haar.forward(rgb.g, -1);
+        float[][] gCoef = haar.forward(rgb.g, -1);
         Logger.debug("Forward DWT B...");
-        double[][] bCoef = haar.forward(rgb.b, -1);
+        float[][] bCoef = haar.forward(rgb.b, -1);
 
-        double maxAbs = Math.max(MatrixUtil.maxAbs(rCoef),Math.max(MatrixUtil.maxAbs(gCoef),MatrixUtil.maxAbs(bCoef)));
+        float maxAbs = Math.max(MatrixUtil.maxAbs(rCoef),Math.max(MatrixUtil.maxAbs(gCoef),MatrixUtil.maxAbs(bCoef)));
 
-        double p = thresholdPercent / 100.0;
-        double thr = p * p * maxAbs;
+        float p = (float) (thresholdPercent / 100.0);
+        float thr = p * p * maxAbs;
         Logger.info("Max abs coefficient: " + maxAbs);
         Logger.info("Applying threshold: " + thresholdPercent + " -> value: " + thr);
 
@@ -28,11 +28,11 @@ public class WaveletPipeline {
 
         //inverse
         Logger.debug("Inverse DWT R...");
-        double[][] rRec = haar.inverse(rCoef, -1);
+        float[][] rRec = haar.inverse(rCoef, -1);
         Logger.debug("Inverse DWT G...");
-        double[][] gRec = haar.inverse(gCoef, -1);
+        float[][] gRec = haar.inverse(gCoef, -1);
         Logger.debug("Inverse DWT B...");
-        double[][] bRec = haar.inverse(bCoef, -1);
+        float[][] bRec = haar.inverse(bCoef, -1);
 
         return ImageRGB.toImage(rRec, gRec, bRec);
     }

@@ -13,17 +13,17 @@ public class ParallelWaveletPipeline {
 
     public BufferedImage compressAndReconstruct(BufferedImage img, int thresholdPercent) throws InterruptedException {
         ImageRGB rgb = ImageRGB.fromImage(img);
-        final double[][] r = rgb.r;
-        final double[][] g = rgb.g;
-        final double[][] b = rgb.b;
+        final float[][] r = rgb.r;
+        final float[][] g = rgb.g;
+        final float[][] b = rgb.b;
 
-        final double[][] rCoef = new double[r.length][r[0].length];
-        final double[][] gCoef = new double[g.length][g[0].length];
-        final double[][] bCoef = new double[b.length][b[0].length];
+        final float[][] rCoef = new float[r.length][r[0].length];
+        final float[][] gCoef = new float[g.length][g[0].length];
+        final float[][] bCoef = new float[b.length][b[0].length];
 
-        final double[][] rRec = new double[r.length][r[0].length];
-        final double[][] gRec = new double[g.length][g[0].length];
-        final double[][] bRec = new double[b.length][b[0].length];
+        final float[][] rRec = new float[r.length][r[0].length];
+        final float[][] gRec = new float[g.length][g[0].length];
+        final float[][] bRec = new float[b.length][b[0].length];
 
         int numThreads = Runtime.getRuntime().availableProcessors();
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);
@@ -42,10 +42,10 @@ public class ParallelWaveletPipeline {
             }
 
             //threshold formula
-            double maxAbs = Math.max(MatrixUtil.maxAbs(rCoef),
+            float maxAbs = Math.max(MatrixUtil.maxAbs(rCoef),
                     Math.max(MatrixUtil.maxAbs(gCoef), MatrixUtil.maxAbs(bCoef)));
-            double p = thresholdPercent / 100.0;
-            double threshold = p * p * maxAbs;
+            float p = (float) (thresholdPercent / 100.0);
+            float threshold = p * p * maxAbs;
 
             Logger.info("Max abs coefficient: " + maxAbs + " | Applied threshold: " + threshold);
 
@@ -89,13 +89,13 @@ public class ParallelWaveletPipeline {
         return ImageRGB.toImage(rRec, gRec, bRec);
     }
 
-    private static void copy2D(double[][] src, double[][] dest) {
+    private static void copy2D(float[][] src, float[][] dest) {
         for (int i = 0; i < src.length; i++) {
             System.arraycopy(src[i], 0, dest[i], 0, src[i].length);
         }
     }
 
-    private void parallelThresholdInPlace(double[][] coef, double threshold) {
+    private void parallelThresholdInPlace(float[][] coef, float threshold) {
         int height = coef.length;
         int width = coef[0].length;
         int numThreads = Runtime.getRuntime().availableProcessors();
@@ -113,7 +113,7 @@ public class ParallelWaveletPipeline {
                     for (int y = startY; y < endY; y++) {
                         for (int x = 0; x < width; x++) {
                             if (Math.abs(coef[y][x]) < threshold) {
-                                coef[y][x] = 0.0;
+                                coef[y][x] = 0.0F;
                             }
                         }
                     }

@@ -10,16 +10,15 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
 
-
 public class DistributedWaveletMPJ {
 
     public static void runMPI(String[] args, boolean isRoot) throws Exception {
         int rank = MPI.COMM_WORLD.Rank();
         int size = MPI.COMM_WORLD.Size();
 
-        Logger.info("[Rank " + rank + "/" + size + "] started - TRANSPOSE APPROACH (EXACT MATCH sequential)");
+        Logger.info("[Rank " + rank + "/" + size + "] HYBRID OPTIMIZED - horizontal svi | vertical+threshold SAMO root");
 
-        double thresholdPercent = 5.0;
+        float thresholdPercent = 5.0f;
         BufferedImage originalImage = null;
         int height = 0, width = 0;
 
@@ -43,17 +42,19 @@ public class DistributedWaveletMPJ {
             width = originalImage.getWidth();
         }
 
+        //Broadcast dimensions
         int[] dims = new int[]{height, width};
         MPI.COMM_WORLD.Bcast(dims, 0, 2, MPI.INT, 0);
         height = dims[0];
         width = dims[1];
 
-        double[] thr = {thresholdPercent};
-        MPI.COMM_WORLD.Bcast(thr, 0, 1, MPI.DOUBLE, 0);
+        float[] thr = {thresholdPercent};
+        MPI.COMM_WORLD.Bcast(thr, 0, 1, MPI.FLOAT, 0);
         thresholdPercent = thr[0];
+
         int maxLevels = -1;
 
-        //partitioning
+        //row partitioning
         int rowsPerProc = height / size;
         int remainder = height % size;
         int[] sendCounts = new int[size];
@@ -68,9 +69,9 @@ public class DistributedWaveletMPJ {
 
         int localRows = rowsPerProc + (rank < remainder ? 1 : 0);
 
-        double[] localData = new double[localRows * width * 3];
+        float[] localData = new float[localRows * width * 3];
 
-        double[] flatData = new double[height * width * 3];
+        float[] flatData = new float[height * width * 3];
         if (isRoot) {
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
@@ -83,72 +84,101 @@ public class DistributedWaveletMPJ {
             }
         }
 
-        MPI.COMM_WORLD.Scatterv(flatData, 0, sendCounts, displs, MPI.DOUBLE,
-                localData, 0, localRows * width * 3, MPI.DOUBLE, 0);
+        MPI.COMM_WORLD.Scatterv(flatData, 0, sendCounts, displs, MPI.FLOAT,
+                localData, 0, localRows * width * 3, MPI.FLOAT, 0);
 
-        TimerMs timer = new TimerMs();
-        if (rank == 0) timer.start();
+        TimerMs totalTimer = new TimerMs();
+        if (rank == 0) totalTimer.start();
+
+        TimerMs compTimer = new TimerMs();
+        TimerMs commTimer = new TimerMs();
 
         HaarWavelet2D haar = new HaarWavelet2D();
 
-        double[][] r = extractChannel(localData, localRows, width, 0);
-        double[][] g = extractChannel(localData, localRows, width, 1);
-        double[][] b = extractChannel(localData, localRows, width, 2);
+        float[][] r = extractChannel(localData, localRows, width, 0);
+        float[][] g = extractChannel(localData, localRows, width, 1);
+        float[][] b = extractChannel(localData, localRows, width, 2);
 
+        //horizontal forward
+        compTimer.start();
         haar.horizontalForwardInPlace(r, maxLevels);
         haar.horizontalForwardInPlace(g, maxLevels);
         haar.horizontalForwardInPlace(b, maxLevels);
+        compTimer.stop();
 
-        double[][] fullR = allGatherMatrix(r, height, width, rank, size);
-        double[][] fullG = allGatherMatrix(g, height, width, rank, size);
-        double[][] fullB = allGatherMatrix(b, height, width, rank, size);
+        //Gather to root
+        commTimer.start();
+        float[][] fullR = gatherToRoot(r, height, width, rank, size);
+        float[][] fullG = gatherToRoot(g, height, width, rank, size);
+        float[][] fullB = gatherToRoot(b, height, width, rank, size);
+        commTimer.stop();
 
-        haar.verticalForwardInPlace(fullR, maxLevels);
-        haar.verticalForwardInPlace(fullG, maxLevels);
-        haar.verticalForwardInPlace(fullB, maxLevels);
+        //vertical
+        if (rank == 0) {
+            compTimer.start();
 
-        //Threshold
-        double maxAbs = Math.max(MatrixUtil.maxAbs(fullR),
-                Math.max(MatrixUtil.maxAbs(fullG), MatrixUtil.maxAbs(fullB)));
+            haar.verticalForwardInPlace(fullR, maxLevels);
+            haar.verticalForwardInPlace(fullG, maxLevels);
+            haar.verticalForwardInPlace(fullB, maxLevels);
 
-        double p = thresholdPercent / 100.0;
-        double threshold = p * p * maxAbs;
+            float maxAbs = Math.max(MatrixUtil.maxAbs(fullR),
+                    Math.max(MatrixUtil.maxAbs(fullG), MatrixUtil.maxAbs(fullB)));
 
-        MatrixUtil.thresholdInPlace(fullR, threshold);
-        MatrixUtil.thresholdInPlace(fullG, threshold);
-        MatrixUtil.thresholdInPlace(fullB, threshold);
+            float p = thresholdPercent / 100.0f;
+            float threshold = p * p * maxAbs;
 
-        haar.verticalInverseInPlace(fullR, maxLevels);
-        haar.verticalInverseInPlace(fullG, maxLevels);
-        haar.verticalInverseInPlace(fullB, maxLevels);
+            Logger.info("[ROOT] Max abs: " + maxAbs + " | Threshold: " + threshold);
 
+            MatrixUtil.thresholdInPlace(fullR, threshold);
+            MatrixUtil.thresholdInPlace(fullG, threshold);
+            MatrixUtil.thresholdInPlace(fullB, threshold);
+
+            haar.verticalInverseInPlace(fullR, maxLevels);
+            haar.verticalInverseInPlace(fullG, maxLevels);
+            haar.verticalInverseInPlace(fullB, maxLevels);
+
+            compTimer.stop();
+        }
+
+        //scatter
+        commTimer.start();
         int startRow = calculateStartRow(rank, height, size);
-        double[][] localR = extractLocalStrip(fullR, startRow, localRows);
-        double[][] localG = extractLocalStrip(fullG, startRow, localRows);
-        double[][] localB = extractLocalStrip(fullB, startRow, localRows);
+        float[][] localR = scatterFromRoot(fullR, startRow, localRows, height, width, rank, size);
+        float[][] localG = scatterFromRoot(fullG, startRow, localRows, height, width, rank, size);
+        float[][] localB = scatterFromRoot(fullB, startRow, localRows, height, width, rank, size);
+        commTimer.stop();
 
+        //Horizontal inverse
+        compTimer.start();
         haar.horizontalInverseInPlace(localR, maxLevels);
         haar.horizontalInverseInPlace(localG, maxLevels);
         haar.horizontalInverseInPlace(localB, maxLevels);
+        compTimer.stop();
 
-        double[] resultLocal = combineChannels(localR, localG, localB, localRows, width);
+        float[] resultLocal = combineChannels(localR, localG, localB, localRows, width);
 
-        double[] finalResult = (rank == 0) ? new double[height * width * 3] : null;
-        MPI.COMM_WORLD.Gatherv(resultLocal, 0, resultLocal.length, MPI.DOUBLE,
-                finalResult, 0, sendCounts, displs, MPI.DOUBLE, 0);
+        float[] finalResult = (rank == 0) ? new float[height * width * 3] : null;
+
+        commTimer.start();
+        MPI.COMM_WORLD.Gatherv(resultLocal, 0, resultLocal.length, MPI.FLOAT,
+                finalResult, 0, sendCounts, displs, MPI.FLOAT, 0);
+        commTimer.stop();
 
         if (rank == 0) {
-            long elapsed = timer.stop();
-            Logger.info("Distributed DWT (Transpose + EXACT MATCH) finished in " + elapsed + " ms");
+            long totalTime = totalTimer.stop();
+            Logger.info("=== DISTRIBUTED HYBRID OPTIMIZED FINISHED ===");
+            Logger.info("Total time          : " + totalTime + " ms");
+            Logger.info("Computation time    : " + compTimer.stop() + " ms");   // drugi stop se ignoriše jer je već stop-ovan
+            Logger.info("Communication time  : " + commTimer.stop() + " ms");
 
-            double[][][] rgb = toRGBMatrix(finalResult, height, width);
+            float[][][] rgb = toRGBMatrix(finalResult, height, width);
             BufferedImage reconstructed = ImageRGB.toImage(rgb[0], rgb[1], rgb[2]);
 
-            showResultWindow(originalImage, reconstructed, elapsed);
+            showResultWindow(originalImage, reconstructed, totalTime);
         }
     }
 
-    //helper functions
+    //helper methods
     private static int calculateStartRow(int rank, int height, int size) {
         int rowsPerProc = height / size;
         int remainder = height % size;
@@ -159,8 +189,8 @@ public class DistributedWaveletMPJ {
         return start;
     }
 
-    private static double[][] allGatherMatrix(double[][] local, int height, int width, int rank, int size) {
-        double[] flatLocal = flatten(local);
+    private static float[][] gatherToRoot(float[][] local, int height, int width, int rank, int size) {
+        float[] flatLocal = flatten(local);
         int localElems = local.length * width;
 
         int[] recvCounts = new int[size];
@@ -171,42 +201,63 @@ public class DistributedWaveletMPJ {
             displs[i] = (i == 0) ? 0 : displs[i-1] + recvCounts[i-1];
         }
 
-        double[] fullFlat = new double[height * width];
-        MPI.COMM_WORLD.Allgatherv(flatLocal, 0, localElems, MPI.DOUBLE, fullFlat, 0, recvCounts, displs, MPI.DOUBLE);
-        return unflatten(fullFlat, height, width);
+        float[] fullFlat = (rank == 0) ? new float[height * width] : null;
+        MPI.COMM_WORLD.Gatherv(flatLocal, 0, localElems, MPI.FLOAT, fullFlat, 0, recvCounts, displs, MPI.FLOAT, 0);
+
+        return (rank == 0) ? unflatten(fullFlat, height, width) : null;
     }
 
-    private static double[][] extractLocalStrip(double[][] full, int startRow, int localRows) {
-        double[][] strip = new double[localRows][full[0].length];
-        for (int i = 0; i < localRows; i++) {
-            System.arraycopy(full[startRow + i], 0, strip[i], 0, full[0].length);
+    private static float[][] scatterFromRoot(float[][] full, int startRow, int localRows, int height, int width, int rank, int size) {
+        int[] sendCounts = new int[size];
+        int[] displs = new int[size];
+        int offset = 0;
+        for (int i = 0; i < size; i++) {
+            int rows = height / size + (i < height % size ? 1 : 0);
+            sendCounts[i] = rows * width;
+            displs[i] = offset;
+            offset += sendCounts[i];
         }
-        return strip;
+
+        float[] localFlat = new float[localRows * width];
+
+        if (rank == 0) {
+            float[] fullFlat = flatten(full);
+            MPI.COMM_WORLD.Scatterv(fullFlat, 0, sendCounts, displs, MPI.FLOAT,
+                    localFlat, 0, localRows * width, MPI.FLOAT, 0);
+        } else {
+            MPI.COMM_WORLD.Scatterv(null, 0, null, null, MPI.FLOAT,
+                    localFlat, 0, localRows * width, MPI.FLOAT, 0);
+        }
+        return unflatten(localFlat, localRows, width);
     }
 
-    private static double[] flatten(double[][] mat) {
+    private static float[] flatten(float[][] mat) {
         int h = mat.length, w = mat[0].length;
-        double[] flat = new double[h * w];
-        for (int i = 0; i < h; i++) System.arraycopy(mat[i], 0, flat, i * w, w);
+        float[] flat = new float[h * w];
+        for (int i = 0; i < h; i++) {
+            System.arraycopy(mat[i], 0, flat, i * w, w);
+        }
         return flat;
     }
 
-    private static double[][] unflatten(double[] flat, int h, int w) {
-        double[][] mat = new double[h][w];
-        for (int i = 0; i < h; i++) System.arraycopy(flat, i * w, mat[i], 0, w);
+    private static float[][] unflatten(float[] flat, int h, int w) {
+        float[][] mat = new float[h][w];
+        for (int i = 0; i < h; i++) {
+            System.arraycopy(flat, i * w, mat[i], 0, w);
+        }
         return mat;
     }
 
-    private static double[][] extractChannel(double[] flat, int rows, int width, int channel) {
-        double[][] mat = new double[rows][width];
+    private static float[][] extractChannel(float[] flat, int rows, int width, int channel) {
+        float[][] mat = new float[rows][width];
         for (int i = 0; i < rows; i++)
             for (int j = 0; j < width; j++)
                 mat[i][j] = flat[(i * width + j) * 3 + channel];
         return mat;
     }
 
-    private static double[] combineChannels(double[][] r, double[][] g, double[][] b, int rows, int width) {
-        double[] flat = new double[rows * width * 3];
+    private static float[] combineChannels(float[][] r, float[][] g, float[][] b, int rows, int width) {
+        float[] flat = new float[rows * width * 3];
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < width; j++) {
                 int idx = (i * width + j) * 3;
@@ -218,8 +269,8 @@ public class DistributedWaveletMPJ {
         return flat;
     }
 
-    private static double[][][] toRGBMatrix(double[] flat, int h, int w) {
-        double[][][] rgb = new double[3][h][w];
+    private static float[][][] toRGBMatrix(float[] flat, int h, int w) {
+        float[][][] rgb = new float[3][h][w];
         for (int i = 0; i < h; i++)
             for (int j = 0; j < w; j++)
                 for (int c = 0; c < 3; c++)
@@ -229,7 +280,7 @@ public class DistributedWaveletMPJ {
 
     private static void showResultWindow(BufferedImage original, BufferedImage reconstructed, long timeMs) {
         SwingUtilities.invokeLater(() -> {
-            JFrame f = new JFrame("Distributed DWT – Time: " + timeMs + " ms");
+            JFrame f = new JFrame("Distributed DWT – Time: " + timeMs + " ms (Hybrid Optimized)");
             f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             f.setLayout(new BorderLayout());
 
@@ -261,15 +312,18 @@ public class DistributedWaveletMPJ {
 
     private static Image scaleImage(BufferedImage img) {
         int target = 520;
-        double aspect = (double) img.getWidth() / img.getHeight();
+        float aspect = (float) img.getWidth() / img.getHeight();
         int w = target;
         int h = (int) (w / aspect);
         if (h > target) { h = target; w = (int)(h * aspect); }
         return img.getScaledInstance(w, h, Image.SCALE_SMOOTH);
     }
 
-    private static double clampThreshold(String s) {
-        try { return Math.max(0, Math.min(100, Double.parseDouble(s))); }
-        catch (Exception e) { return 5.0; }
+    private static float clampThreshold(String s) {
+        try {
+            return Math.max(0f, Math.min(100f, Float.parseFloat(s)));
+        } catch (Exception e) {
+            return 5.0f;
+        }
     }
 }

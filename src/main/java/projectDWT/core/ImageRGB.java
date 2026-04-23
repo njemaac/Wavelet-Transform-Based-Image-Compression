@@ -3,11 +3,11 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 
 public class ImageRGB {
-    public final double[][] r;
-    public final double[][] g;
-    public final double[][] b;
+    public final float[][] r;
+    public final float[][] g;
+    public final float[][] b;
 
-    public ImageRGB(double[][] r, double[][] g, double[][] b) {
+    public ImageRGB(float[][] r, float[][] g, float[][] b) {
         this.r = r;
         this.g = g;
         this.b = b;
@@ -17,9 +17,9 @@ public class ImageRGB {
         int w = img.getWidth();
         int h = img.getHeight();
 
-        double[][] R = new double[h][w];
-        double[][] G = new double[h][w];
-        double[][] B = new double[h][w];
+        float[][] R = new float[h][w];
+        float[][] G = new float[h][w];
+        float[][] B = new float[h][w];
 
         for (int y = 0; y < h; y++){
             for (int x = 0; x < w; x++){
@@ -33,7 +33,7 @@ public class ImageRGB {
         return new ImageRGB(R, G, B);
     }
 
-    public static BufferedImage toImage(double[][] R, double[][] G, double[][] B){
+    public static BufferedImage toImage(float[][] R, float[][] G, float[][] B){
         int h = R.length;
         int w = R[0].length;
         BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);

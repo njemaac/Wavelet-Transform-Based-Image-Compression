@@ -5,28 +5,28 @@ import java.util.List;
 
 public class HaarWavelet2D {
 
-    public double[][] forward(double[][] src, int maxLevels) {
-        double[][] a = MatrixUtil.copy(src);
+    public float[][] forward(float[][] src, int maxLevels) {
+        float[][] a = MatrixUtil.copy(src);
         horizontalForwardInPlace(a, maxLevels);
         verticalForwardInPlace(a, maxLevels);
         return a;
     }
 
-    public double[][] inverse(double[][] coef, int maxLevels) {
-        double[][] a = MatrixUtil.copy(coef);
+    public float[][] inverse(float[][] coef, int maxLevels) {
+        float[][] a = MatrixUtil.copy(coef);
         verticalInverseInPlace(a, maxLevels);   //vertical first
         horizontalInverseInPlace(a, maxLevels);
         return a;
     }
 
     //horizontal DWT
-    public void horizontalForwardInPlace(double[][] mat, int maxLevels) {
+    public void horizontalForwardInPlace(float[][] mat, int maxLevels) {
         int h = mat.length;
         int w = mat[0].length;
         int curW = w;
         int level = 0;
         while (curW >= 2 && (maxLevels == -1 || level < maxLevels)) {
-            double[] row = new double[curW];
+            float[] row = new float[curW];
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < curW; x++) row[x] = mat[y][x];
                 haar1DInPlace(row, curW);
@@ -37,7 +37,7 @@ public class HaarWavelet2D {
         }
     }
 
-    public void horizontalInverseInPlace(double[][] mat, int maxLevels) {
+    public void horizontalInverseInPlace(float[][] mat, int maxLevels) {
         int h = mat.length;
         int w = mat[0].length;
         List<Integer> widths = new ArrayList<>();
@@ -50,7 +50,7 @@ public class HaarWavelet2D {
         }
         for (int i = widths.size() - 1; i >= 0; i--) {
             int regW = widths.get(i);
-            double[] row = new double[regW];
+            float[] row = new float[regW];
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < regW; x++) row[x] = mat[y][x];
                 inverseHaar1DInPlace(row, regW);
@@ -60,13 +60,13 @@ public class HaarWavelet2D {
     }
 
     //vertical DWT
-    public void verticalForwardInPlace(double[][] mat, int maxLevels) {
+    public void verticalForwardInPlace(float[][] mat, int maxLevels) {
         int h = mat.length;
         int w = mat[0].length;
         int curH = h;
         int level = 0;
         while (curH >= 2 && (maxLevels == -1 || level < maxLevels)) {
-            double[] col = new double[curH];
+            float[] col = new float[curH];
             for (int x = 0; x < w; x++) {
                 for (int y = 0; y < curH; y++) col[y] = mat[y][x];
                 haar1DInPlace(col, curH);
@@ -77,7 +77,7 @@ public class HaarWavelet2D {
         }
     }
 
-    public void verticalInverseInPlace(double[][] mat, int maxLevels) {
+    public void verticalInverseInPlace(float[][] mat, int maxLevels) {
         int h = mat.length;
         int w = mat[0].length;
         List<Integer> heights = new ArrayList<>();
@@ -90,7 +90,7 @@ public class HaarWavelet2D {
         }
         for (int i = heights.size() - 1; i >= 0; i--) {
             int regH = heights.get(i);
-            double[] col = new double[regH];
+            float[] col = new float[regH];
             for (int x = 0; x < w; x++) {
                 for (int y = 0; y < regH; y++) col[y] = mat[y][x];
                 inverseHaar1DInPlace(col, regH);
@@ -100,18 +100,18 @@ public class HaarWavelet2D {
     }
 
     //private methods
-    private void haar1DInPlace(double[] v, int n) {
+    private void haar1DInPlace(float[] v, int n) {
         if(n < 2) return;
 
         int lowSize = (n+1)/2;
-        double[] tmp = new double[n];
+        float[] tmp = new float[n];
         int i = 0;
 
         for (int j = 0; j < n - 1; j+=2) {
-            double a = v[j];
-            double b = v[j+1];
-            tmp[i] = (a + b) / 2.0;
-            tmp[i + lowSize] = (a - b) / 2.0;
+            float a = v[j];
+            float b = v[j+1];
+            tmp[i] = (float) ((a + b) / 2.0);
+            tmp[i + lowSize] = (float) ((a - b) / 2.0);
             i++;
         }
 
@@ -121,16 +121,16 @@ public class HaarWavelet2D {
         System.arraycopy(tmp, 0, v, 0, n);
     }
 
-    private void inverseHaar1DInPlace(double[] v, int n) {
+    private void inverseHaar1DInPlace(float[] v, int n) {
         if (n < 2) return;
 
         int lowSize = (n+1) / 2;
-        double[] tmp = new double[n];
+        float[] tmp = new float[n];
 
         //reconstructing all of the full pairs
         for (int i = 0; i < n/2; i++) {
-            double avg = v[i];
-            double diff = v[i + lowSize];
+            float avg = v[i];
+            float diff = v[i + lowSize];
             tmp[2 * i] = avg + diff;
             tmp[2 * i + 1] = avg - diff;
         }

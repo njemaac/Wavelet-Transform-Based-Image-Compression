@@ -163,7 +163,7 @@ public class WaveletParallelApp {
         int h = label.getHeight();
         if (w <= 0 || h <= 0) return img.getScaledInstance(400, 400, Image.SCALE_SMOOTH);
 
-        double aspect = (double) img.getWidth() / img.getHeight();
+        float aspect = (float) img.getWidth() / img.getHeight();
 
         int nw = w;
         int nh = (int) (nw / aspect);
