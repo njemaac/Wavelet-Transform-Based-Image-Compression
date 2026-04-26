@@ -16,7 +16,7 @@ public class DistributedWaveletMPJ {
         int rank = MPI.COMM_WORLD.Rank();
         int size = MPI.COMM_WORLD.Size();
 
-        Logger.info("[Rank " + rank + "/" + size + "] HYBRID OPTIMIZED - horizontal svi | vertical+threshold SAMO root");
+        Logger.info("[Rank " + rank + "/" + size + "] HYBRID OPTIMIZED (Horizontal MPI + Vertical on Root)");
 
         float thresholdPercent = 5.0f;
         BufferedImage originalImage = null;
@@ -26,7 +26,7 @@ public class DistributedWaveletMPJ {
             final String[] chosen = {null, "5"};
             SwingUtilities.invokeAndWait(() -> {
                 JFileChooser fc = new JFileChooser();
-                fc.setDialogTitle("Load Image — Distributed DWT");
+                fc.setDialogTitle("Load Image — Distributed DWT (Hybrid)");
                 if (fc.showOpenDialog(null) == JFileChooser.APPROVE_OPTION)
                     chosen[0] = fc.getSelectedFile().getAbsolutePath();
 
@@ -42,7 +42,7 @@ public class DistributedWaveletMPJ {
             width = originalImage.getWidth();
         }
 
-        //Broadcast dimensions
+        //broadcast
         int[] dims = new int[]{height, width};
         MPI.COMM_WORLD.Bcast(dims, 0, 2, MPI.INT, 0);
         height = dims[0];
@@ -68,18 +68,17 @@ public class DistributedWaveletMPJ {
         }
 
         int localRows = rowsPerProc + (rank < remainder ? 1 : 0);
-
         float[] localData = new float[localRows * width * 3];
 
         float[] flatData = new float[height * width * 3];
         if (isRoot) {
+            ImageRGB rgb = ImageRGB.fromImage(originalImage);
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
-                    int rgb = originalImage.getRGB(x, y);
                     int idx = (y * width + x) * 3;
-                    flatData[idx]     = (rgb >> 16) & 0xFF;
-                    flatData[idx + 1] = (rgb >> 8) & 0xFF;
-                    flatData[idx + 2] = rgb & 0xFF;
+                    flatData[idx]     = rgb.r[y][x];
+                    flatData[idx + 1] = rgb.g[y][x];
+                    flatData[idx + 2] = rgb.b[y][x];
                 }
             }
         }
@@ -88,32 +87,32 @@ public class DistributedWaveletMPJ {
                 localData, 0, localRows * width * 3, MPI.FLOAT, 0);
 
         TimerMs totalTimer = new TimerMs();
-        if (rank == 0) totalTimer.start();
-
         TimerMs compTimer = new TimerMs();
         TimerMs commTimer = new TimerMs();
 
+        if (rank == 0) totalTimer.start();
+
         HaarWavelet2D haar = new HaarWavelet2D();
 
-        float[][] r = extractChannel(localData, localRows, width, 0);
-        float[][] g = extractChannel(localData, localRows, width, 1);
-        float[][] b = extractChannel(localData, localRows, width, 2);
+        float[][] localR = extractChannel(localData, localRows, width, 0);
+        float[][] localG = extractChannel(localData, localRows, width, 1);
+        float[][] localB = extractChannel(localData, localRows, width, 2);
 
         //horizontal forward
         compTimer.start();
-        haar.horizontalForwardInPlace(r, maxLevels);
-        haar.horizontalForwardInPlace(g, maxLevels);
-        haar.horizontalForwardInPlace(b, maxLevels);
+        haar.horizontalForwardInPlace(localR, maxLevels);
+        haar.horizontalForwardInPlace(localG, maxLevels);
+        haar.horizontalForwardInPlace(localB, maxLevels);
         compTimer.stop();
 
-        //Gather to root
+        //gather to root
         commTimer.start();
-        float[][] fullR = gatherToRoot(r, height, width, rank, size);
-        float[][] fullG = gatherToRoot(g, height, width, rank, size);
-        float[][] fullB = gatherToRoot(b, height, width, rank, size);
+        float[][] fullR = gatherToRoot(localR, height, width, rank, size);
+        float[][] fullG = gatherToRoot(localG, height, width, rank, size);
+        float[][] fullB = gatherToRoot(localB, height, width, rank, size);
         commTimer.stop();
 
-        //vertical
+        //vertical + threshold + inverse vertical only root
         if (rank == 0) {
             compTimer.start();
 
@@ -124,9 +123,7 @@ public class DistributedWaveletMPJ {
             float maxAbs = Math.max(MatrixUtil.maxAbs(fullR),
                     Math.max(MatrixUtil.maxAbs(fullG), MatrixUtil.maxAbs(fullB)));
 
-            float p = thresholdPercent / 100.0f;
-            float threshold = p * p * maxAbs;
-
+            float threshold = (thresholdPercent / 100.0f) * (thresholdPercent / 100.0f) * maxAbs;
             Logger.info("[ROOT] Max abs: " + maxAbs + " | Threshold: " + threshold);
 
             MatrixUtil.thresholdInPlace(fullR, threshold);
@@ -143,19 +140,19 @@ public class DistributedWaveletMPJ {
         //scatter
         commTimer.start();
         int startRow = calculateStartRow(rank, height, size);
-        float[][] localR = scatterFromRoot(fullR, startRow, localRows, height, width, rank, size);
-        float[][] localG = scatterFromRoot(fullG, startRow, localRows, height, width, rank, size);
-        float[][] localB = scatterFromRoot(fullB, startRow, localRows, height, width, rank, size);
+        float[][] localRinv = scatterFromRoot(fullR, startRow, localRows, height, width, rank, size);
+        float[][] localGinv = scatterFromRoot(fullG, startRow, localRows, height, width, rank, size);
+        float[][] localBinv = scatterFromRoot(fullB, startRow, localRows, height, width, rank, size);
         commTimer.stop();
 
-        //Horizontal inverse
+        //local horizontal inverse
         compTimer.start();
-        haar.horizontalInverseInPlace(localR, maxLevels);
-        haar.horizontalInverseInPlace(localG, maxLevels);
-        haar.horizontalInverseInPlace(localB, maxLevels);
+        haar.horizontalInverseInPlace(localRinv, maxLevels);
+        haar.horizontalInverseInPlace(localGinv, maxLevels);
+        haar.horizontalInverseInPlace(localBinv, maxLevels);
         compTimer.stop();
 
-        float[] resultLocal = combineChannels(localR, localG, localB, localRows, width);
+        float[] resultLocal = combineChannels(localRinv, localGinv, localBinv, localRows, width);
 
         float[] finalResult = (rank == 0) ? new float[height * width * 3] : null;
 
@@ -166,9 +163,9 @@ public class DistributedWaveletMPJ {
 
         if (rank == 0) {
             long totalTime = totalTimer.stop();
-            Logger.info("=== DISTRIBUTED HYBRID OPTIMIZED FINISHED ===");
+            Logger.info("=== DISTRIBUTED HYBRID FINISHED ===");
             Logger.info("Total time          : " + totalTime + " ms");
-            Logger.info("Computation time    : " + compTimer.stop() + " ms");   // drugi stop se ignoriše jer je već stop-ovan
+            Logger.info("Computation time    : " + compTimer.stop() + " ms");
             Logger.info("Communication time  : " + commTimer.stop() + " ms");
 
             float[][][] rgb = toRGBMatrix(finalResult, height, width);
@@ -178,7 +175,7 @@ public class DistributedWaveletMPJ {
         }
     }
 
-    //helper methods
+    //helpers
     private static int calculateStartRow(int rank, int height, int size) {
         int rowsPerProc = height / size;
         int remainder = height % size;
@@ -198,7 +195,7 @@ public class DistributedWaveletMPJ {
         for (int i = 0; i < size; i++) {
             int rows = height / size + (i < height % size ? 1 : 0);
             recvCounts[i] = rows * width;
-            displs[i] = (i == 0) ? 0 : displs[i-1] + recvCounts[i-1];
+            displs[i] = (i == 0) ? 0 : displs[i - 1] + recvCounts[i - 1];
         }
 
         float[] fullFlat = (rank == 0) ? new float[height * width] : null;
@@ -280,7 +277,7 @@ public class DistributedWaveletMPJ {
 
     private static void showResultWindow(BufferedImage original, BufferedImage reconstructed, long timeMs) {
         SwingUtilities.invokeLater(() -> {
-            JFrame f = new JFrame("Distributed DWT – Time: " + timeMs + " ms (Hybrid Optimized)");
+            JFrame f = new JFrame("Distributed DWT (Hybrid) – Time: " + timeMs + " ms");
             f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             f.setLayout(new BorderLayout());
 
@@ -289,7 +286,7 @@ public class DistributedWaveletMPJ {
             JLabel recLabel = new JLabel(new ImageIcon(scaleImage(reconstructed)));
 
             origLabel.setBorder(BorderFactory.createTitledBorder("Original"));
-            recLabel.setBorder(BorderFactory.createTitledBorder("Reconstructed (Distributed)"));
+            recLabel.setBorder(BorderFactory.createTitledBorder("Reconstructed (Distributed Hybrid)"));
 
             panel.add(new JScrollPane(origLabel));
             panel.add(new JScrollPane(recLabel));
@@ -304,14 +301,14 @@ public class DistributedWaveletMPJ {
 
             f.add(panel, BorderLayout.CENTER);
             f.add(saveBtn, BorderLayout.SOUTH);
-            f.setSize(1150, 720);
+            f.setSize(1200, 720);
             f.setLocationRelativeTo(null);
             f.setVisible(true);
         });
     }
 
     private static Image scaleImage(BufferedImage img) {
-        int target = 520;
+        int target = 560;
         float aspect = (float) img.getWidth() / img.getHeight();
         int w = target;
         int h = (int) (w / aspect);

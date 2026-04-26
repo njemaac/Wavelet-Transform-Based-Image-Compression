@@ -7,11 +7,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-public class ParallelWaveletPipeline {
+public class ParallelWaveletPipeline implements WaveletPipeline {
 
     private final HaarWavelet2D haar = new HaarWavelet2D();
+    private ExecutorService executor;
 
-    public BufferedImage compressAndReconstruct(BufferedImage img, int thresholdPercent) throws InterruptedException {
+    @Override
+    public BufferedImage compressAndReconstruct(BufferedImage img, int thresholdPercent) throws Exception {
         ImageRGB rgb = ImageRGB.fromImage(img);
         final float[][] r = rgb.r;
         final float[][] g = rgb.g;
@@ -26,60 +28,41 @@ public class ParallelWaveletPipeline {
         final float[][] bRec = new float[b.length][b[0].length];
 
         int numThreads = Runtime.getRuntime().availableProcessors();
-        ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        executor = Executors.newFixedThreadPool(numThreads);
 
         try {
-            //forward DWT by channels
+            //Forward DWT
             executor.submit(() -> copy2D(haar.forward(r, -1), rCoef));
             executor.submit(() -> copy2D(haar.forward(g, -1), gCoef));
             executor.submit(() -> copy2D(haar.forward(b, -1), bCoef));
 
-            //waiting
             executor.shutdown();
-            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-                throw new InterruptedException("Forward DWT timeout");
-            }
+            executor.awaitTermination(60, TimeUnit.SECONDS);
 
-            //threshold formula
+            //Threshold
             float maxAbs = Math.max(MatrixUtil.maxAbs(rCoef),
                     Math.max(MatrixUtil.maxAbs(gCoef), MatrixUtil.maxAbs(bCoef)));
-            float p = (float) (thresholdPercent / 100.0);
-            float threshold = p * p * maxAbs;
+            float thr = (thresholdPercent / 100.0f) * (thresholdPercent / 100.0f) * maxAbs;
 
-            Logger.info("Max abs coefficient: " + maxAbs + " | Applied threshold: " + threshold);
+            Logger.info("Max abs coefficient: " + maxAbs + " | Threshold: " + thr);
 
             executor = Executors.newFixedThreadPool(numThreads);
-
-            executor.submit(() -> parallelThresholdInPlace(rCoef, threshold));
-            executor.submit(() -> parallelThresholdInPlace(gCoef, threshold));
-            executor.submit(() -> parallelThresholdInPlace(bCoef, threshold));
+            executor.submit(() -> parallelThresholdInPlace(rCoef, thr));
+            executor.submit(() -> parallelThresholdInPlace(gCoef, thr));
+            executor.submit(() -> parallelThresholdInPlace(bCoef, thr));
 
             executor.shutdown();
-            if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-                throw new InterruptedException("Thresholding timeout");
-            }
+            executor.awaitTermination(30, TimeUnit.SECONDS);
 
-            //inverse DWT
+            //Inverse DWT
             executor = Executors.newFixedThreadPool(numThreads);
-
             executor.submit(() -> copy2D(haar.inverse(rCoef, -1), rRec));
             executor.submit(() -> copy2D(haar.inverse(gCoef, -1), gRec));
             executor.submit(() -> copy2D(haar.inverse(bCoef, -1), bRec));
 
             executor.shutdown();
-            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-                throw new InterruptedException("Inverse DWT timeout");
-            }
+            executor.awaitTermination(60, TimeUnit.SECONDS);
 
-        } catch (InterruptedException e) {
-            Logger.error("Parallel processing was interrupted: " + e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            Logger.error("Error in parallel processing: " + e.getMessage());
-            throw new RuntimeException(e);
         } finally {
             if (executor != null && !executor.isShutdown()) {
                 executor.shutdownNow();
@@ -102,33 +85,28 @@ public class ParallelWaveletPipeline {
         int chunk = (height + numThreads - 1) / numThreads;
 
         ExecutorService threshExec = Executors.newFixedThreadPool(numThreads);
-
         try {
             for (int i = 0; i < numThreads; i++) {
-                final int startY = i * chunk;
-                final int endY = Math.min(startY + chunk, height);
+                int startY = i * chunk;
+                int endY = Math.min(startY + chunk, height);
                 if (startY >= endY) break;
 
                 threshExec.submit(() -> {
                     for (int y = startY; y < endY; y++) {
                         for (int x = 0; x < width; x++) {
                             if (Math.abs(coef[y][x]) < threshold) {
-                                coef[y][x] = 0.0F;
+                                coef[y][x] = 0.0f;
                             }
                         }
                     }
                 });
             }
-
             threshExec.shutdown();
             threshExec.awaitTermination(20, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            Logger.error("Thresholding thread interrupted");
         } finally {
-            if (threshExec != null && !threshExec.isShutdown()) {
-                threshExec.shutdownNow();
-            }
+            if (threshExec != null && !threshExec.isShutdown()) threshExec.shutdownNow();
         }
     }
 }
