@@ -41,7 +41,7 @@ public final class MatrixUtil {
 
     }
     public static int clampToByte(float v){
-        int x = (int)Math.round(v);
+        int x = Math.round(v);
         if (x<0) return 0;
         if (x>255) return 255;
         return x;
