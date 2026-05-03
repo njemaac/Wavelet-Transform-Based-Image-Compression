@@ -1,10 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Učitaj CSV
 df = pd.read_csv("results.csv")
 
-# Očisti prazne redove ako ih ima
 df = df.dropna()
 
 # ===== AVERAGE =====
