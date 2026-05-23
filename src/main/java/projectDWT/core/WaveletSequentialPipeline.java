@@ -8,7 +8,6 @@ public class WaveletSequentialPipeline implements WaveletPipeline {
     @Override
     public BufferedImage compressAndReconstruct(BufferedImage img, int thresholdPercent) {
         ImageRGB rgb = ImageRGB.fromImage(img);
-
         float[][] rCoef = haar.forward(rgb.r, -1);
         float[][] gCoef = haar.forward(rgb.g, -1);
         float[][] bCoef = haar.forward(rgb.b, -1);

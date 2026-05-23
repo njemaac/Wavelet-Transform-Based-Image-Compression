@@ -16,8 +16,8 @@ public class WaveletApp {
     private final JFrame frame;
     private final JLabel originalLabel = new JLabel();
     private final JLabel compressedLabel = new JLabel();
-    private final JSlider thresholdSlider = new JSlider(0, 100, 5);
-    private final JLabel thresholdValueLabel = new JLabel("Threshold: 5%");
+    private final JSlider thresholdSlider = new JSlider(0, 100, 0);
+    private final JLabel thresholdValueLabel = new JLabel("Threshold: 0%");
     private final JLabel timeLabel = new JLabel("Time: - ms");
     private final JButton loadButton = new JButton("Load Image");
     private final JButton saveButton = new JButton("Save Reconstructed");
@@ -118,10 +118,7 @@ public class WaveletApp {
         try {
             long start = System.currentTimeMillis();
 
-            currentPipeline = mode.equals("Sequential")
-                    ? new WaveletSequentialPipeline()
-                    : new ParallelWaveletPipeline();
-
+            currentPipeline = mode.equals("Sequential") ? new WaveletSequentialPipeline() : new ParallelWaveletPipeline();
             reconstructedImage = currentPipeline.compressAndReconstruct(originalImage, thresholdSlider.getValue());
 
             long elapsed = System.currentTimeMillis() - start;
@@ -129,8 +126,7 @@ public class WaveletApp {
             timeLabel.setText("Time: " + elapsed + " ms");
 
             originalLabel.setBorder(BorderFactory.createTitledBorder("Original"));
-            compressedLabel.setBorder(BorderFactory.createTitledBorder(
-                    mode + " | Threshold " + thresholdSlider.getValue() + "%"));
+            compressedLabel.setBorder(BorderFactory.createTitledBorder(mode + " | Threshold " + thresholdSlider.getValue() + "%"));
 
             originalLabel.setIcon(new ImageIcon(scaleImage(originalImage)));
             compressedLabel.setIcon(new ImageIcon(scaleImage(reconstructedImage)));

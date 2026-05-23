@@ -99,7 +99,7 @@ public class HaarWavelet2D {
         }
     }
 
-    //private methods
+    // private methods
     private void haar1DInPlace(float[] v, int n) {
         if(n < 2) return;
 

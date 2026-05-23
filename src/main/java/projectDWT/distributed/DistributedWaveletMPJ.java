@@ -25,7 +25,7 @@ public class DistributedWaveletMPJ {
         int height = 0, width = 0;
 
         if (isRoot) {
-            final String[] chosen = {null, "5"};
+            final String[] chosen = {null, "5"}; //eff final for lambda ref
             SwingUtilities.invokeAndWait(() -> {
                 JFileChooser fc = new JFileChooser();
                 fc.setDialogTitle("Load Image — Distributed DWT");
@@ -33,7 +33,7 @@ public class DistributedWaveletMPJ {
                     chosen[0] = fc.getSelectedFile().getAbsolutePath();
                 }
                 String t = JOptionPane.showInputDialog(null,
-                        "Threshold (0–100%)", "5");
+                        "Threshold (0–100%)", "0");
                 if (t != null && !t.isBlank()) {
                     chosen[1] = t;
                 }
@@ -88,7 +88,7 @@ public class DistributedWaveletMPJ {
                 flatFull, 0, multiplyCounts(rowCounts, width * 3), multiplyDispls(rowDispls, width * 3), MPI.FLOAT,
                 localRGB, 0, localRows * width * 3, MPI.FLOAT, 0
         );
-        flatFull = null;
+        flatFull = null; //freeing the memory
 
         //unpack to separate channels
         float[][] localR = new float[localRows][width];
@@ -318,7 +318,7 @@ public class DistributedWaveletMPJ {
             }
         }
     }
-
+    //partitioning with a remainder
     private static int[] partitionCounts(int total, int size) {
         int[] counts = new int[size];
         int base = total / size;
@@ -328,7 +328,7 @@ public class DistributedWaveletMPJ {
         }
         return counts;
     }
-
+    //offset display for MPI
     private static int[] prefixDispls(int[] counts) {
         int[] displs = new int[counts.length];
         int off = 0;
@@ -355,10 +355,8 @@ public class DistributedWaveletMPJ {
         return out;
     }
 
-    private static void showResultWindow(BufferedImage original,
-                                         BufferedImage reconstructed,
-                                         long totalMs, long compMs,
-                                         long commMs, int numProcs) {
+    private static void showResultWindow(BufferedImage original, BufferedImage reconstructed,
+                                         long totalMs, long compMs, long commMs, int numProcs) {
         SwingUtilities.invokeLater(() -> {
             JFrame f = new JFrame(
                     "Distributed DWT [" + numProcs + " proc] — Total: "
@@ -389,12 +387,8 @@ public class DistributedWaveletMPJ {
                 }
             });
 
-            JLabel statsLabel = new JLabel(
-                    "  Processes: " + numProcs
-                            + "   |   Total: " + totalMs + " ms"
-                            + "   |   Computation: " + compMs + " ms"
-                            + "   |   Communication: " + commMs + " ms",
-                    SwingConstants.CENTER);
+            JLabel statsLabel = new JLabel("  Processes: " + numProcs + "   |   Total: " + totalMs + " ms"
+                            + "   |   Computation: " + compMs + " ms" + "   |   Communication: " + commMs + " ms", SwingConstants.CENTER);
 
             JPanel south = new JPanel(new BorderLayout());
             south.add(saveBtn, BorderLayout.WEST);
